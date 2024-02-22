@@ -114,7 +114,6 @@ SD_API sd_ctx_t* new_sd_ctx(const char* model_path,
                             int n_threads,
                             enum sd_type_t wtype,
                             enum rng_type_t rng_type,
-                            enum schedule_t s,
                             bool keep_control_net_cpu);
 
 SD_API void free_sd_ctx(sd_ctx_t* sd_ctx);
@@ -128,6 +127,7 @@ SD_API sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                            int height,
                            enum sample_method_t sample_method,
                            int sample_steps,
+                           enum schedule_t s,
                            int64_t seed,
                            int batch_count,
                            const sd_image_t* control_cond,
@@ -143,6 +143,7 @@ SD_API sd_image_t* img2img(sd_ctx_t* sd_ctx,
                            int height,
                            enum sample_method_t sample_method,
                            int sample_steps,
+                           enum schedule_t s,
                            float strength,
                            int64_t seed,
                            int batch_count);

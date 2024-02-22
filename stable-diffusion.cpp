@@ -68,6 +68,7 @@ public:
     bool vae_tiling           = false;
 
     std::map<std::string, struct ggml_tensor*> tensors;
+    std::array<float, TIMESTEPS> alphas_cumprod;
 
     std::string lora_model_dir;
     // lora_name => multiplier
@@ -114,7 +115,6 @@ public:
                         const std::string& taesd_path,
                         bool vae_tiling_,
                         ggml_type wtype,
-                        schedule_t schedule,
                         bool control_net_cpu) {
         use_tiny_autoencoder = taesd_path.size() > 0;
 #ifdef SD_USE_CUBLAS
@@ -233,6 +233,7 @@ public:
         }
         ggml_tensor* alphas_cumprod_tensor = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, TIMESTEPS);
         calculate_alphas_cumprod((float*)alphas_cumprod_tensor->data);
+        memcpy(alphas_cumprod.data(), (float*)alphas_cumprod_tensor->data, TIMESTEPS * sizeof(float));
 
         // load weights
         LOG_DEBUG("loading weights");
@@ -292,30 +293,7 @@ public:
             LOG_INFO("running in eps-prediction mode");
         }
 
-        if (schedule != DEFAULT) {
-            switch (schedule) {
-                case DISCRETE:
-                    LOG_INFO("running with discrete schedule");
-                    denoiser->schedule = std::make_shared<DiscreteSchedule>();
-                    break;
-                case KARRAS:
-                    LOG_INFO("running with Karras schedule");
-                    denoiser->schedule = std::make_shared<KarrasSchedule>();
-                    break;
-                case DEFAULT:
-                    // Don't touch anything.
-                    break;
-                default:
-                    LOG_ERROR("Unknown schedule %i", schedule);
-                    abort();
-            }
-        }
-
-        for (int i = 0; i < TIMESTEPS; i++) {
-            denoiser->schedule->alphas_cumprod[i] = ((float*)alphas_cumprod_tensor->data)[i];
-            denoiser->schedule->sigmas[i]         = std::sqrt((1 - denoiser->schedule->alphas_cumprod[i]) / denoiser->schedule->alphas_cumprod[i]);
-            denoiser->schedule->log_sigmas[i]     = std::log(denoiser->schedule->sigmas[i]);
-        }
+        set_schedule(DEFAULT);
 
         LOG_DEBUG("finished loaded file");
         ggml_free(ctx);
@@ -337,6 +315,29 @@ public:
             return tae_first_stage.load_from_file(taesd_path, backend);
         }
         return true;
+    }
+
+    void set_schedule(enum schedule_t schedule) {
+        switch (schedule) {
+            case DEFAULT:
+            case DISCRETE:
+                LOG_INFO("using discrete schedule");
+                denoiser->schedule = std::make_shared<DiscreteSchedule>();
+                break;
+            case KARRAS:
+                LOG_INFO("using Karras schedule");
+                denoiser->schedule = std::make_shared<KarrasSchedule>();
+                break;
+            default:
+                LOG_ERROR("Unknown schedule %i", schedule);
+                abort();
+        }
+
+        for (int i = 0; i < TIMESTEPS; i++) {
+            denoiser->schedule->alphas_cumprod[i] = alphas_cumprod[i];
+            denoiser->schedule->sigmas[i]         = std::sqrt((1 - denoiser->schedule->alphas_cumprod[i]) / denoiser->schedule->alphas_cumprod[i]);
+            denoiser->schedule->log_sigmas[i]     = std::log(denoiser->schedule->sigmas[i]);
+        }
     }
 
     bool is_using_v_parameterization_for_sd2(ggml_context* work_ctx) {
@@ -1148,7 +1149,6 @@ sd_ctx_t* new_sd_ctx(const char* model_path_c_str,
                      int n_threads,
                      enum sd_type_t wtype,
                      enum rng_type_t rng_type,
-                     enum schedule_t s,
                      bool keep_control_net_cpu) {
     sd_ctx_t* sd_ctx = (sd_ctx_t*)malloc(sizeof(sd_ctx_t));
     if (sd_ctx == NULL) {
@@ -1177,7 +1177,6 @@ sd_ctx_t* new_sd_ctx(const char* model_path_c_str,
                                     taesd_path,
                                     vae_tiling,
                                     (ggml_type)wtype,
-                                    s,
                                     keep_control_net_cpu)) {
         delete sd_ctx->sd;
         sd_ctx->sd = NULL;
@@ -1204,14 +1203,18 @@ sd_image_t* txt2img(sd_ctx_t* sd_ctx,
                     int height,
                     enum sample_method_t sample_method,
                     int sample_steps,
+                    enum schedule_t s,
                     int64_t seed,
                     int batch_count,
                     const sd_image_t* control_cond,
                     float control_strength) {
-    LOG_DEBUG("txt2img %dx%d", width, height);
     if (sd_ctx == NULL) {
         return NULL;
     }
+
+    LOG_DEBUG("txt2img %dx%d", width, height);
+    sd_ctx->sd->set_schedule(s);
+
     // LOG_DEBUG("%s %s %f %d %d %d", prompt_c_str, negative_prompt_c_str, cfg_scale, sample_steps, seed, batch_count);
     std::string prompt(prompt_c_str);
     std::string negative_prompt(negative_prompt_c_str);
@@ -1359,16 +1362,19 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
                     int height,
                     sample_method_t sample_method,
                     int sample_steps,
+                    enum schedule_t s,
                     float strength,
                     int64_t seed,
                     int batch_count) {
     if (sd_ctx == NULL) {
         return NULL;
     }
-    std::string prompt(prompt_c_str);
-    std::string negative_prompt(negative_prompt_c_str);
 
     LOG_INFO("img2img %dx%d", width, height);
+    sd_ctx->sd->set_schedule(s);
+
+    std::string prompt(prompt_c_str);
+    std::string negative_prompt(negative_prompt_c_str);
 
     std::vector<float> sigmas = sd_ctx->sd->denoiser->schedule->get_sigmas(sample_steps);
     size_t t_enc              = static_cast<size_t>(sample_steps * strength);

@@ -1552,10 +1552,11 @@ sd_image_t* txt2img(sd_ctx_t* sd_ctx,
 
     struct ggml_init_params params;
     params.mem_size = static_cast<size_t>(10 * 1024 * 1024);  // 10 MB
-    if (sd_version_is_sd3(sd_ctx->sd->version)) {
+    if (sd_version_is_sdxl(sd_ctx->sd->version)) {
+        params.mem_size *= 2;
+    } else if (sd_version_is_sd3(sd_ctx->sd->version)) {
         params.mem_size *= 3;
-    }
-    if (sd_version_is_flux(sd_ctx->sd->version)) {
+    } else if (sd_version_is_flux(sd_ctx->sd->version)) {
         params.mem_size *= 4;
     }
     if (sd_ctx->sd->stacked_id) {
@@ -1664,11 +1665,12 @@ sd_image_t* img2img(sd_ctx_t* sd_ctx,
 
     struct ggml_init_params params;
     params.mem_size = static_cast<size_t>(10 * 1024 * 1024);  // 10 MB
-    if (sd_version_is_sd3(sd_ctx->sd->version)) {
+    if (sd_version_is_sdxl(sd_ctx->sd->version)) {
         params.mem_size *= 2;
-    }
-    if (sd_version_is_flux(sd_ctx->sd->version)) {
+    } else if (sd_version_is_sd3(sd_ctx->sd->version)) {
         params.mem_size *= 3;
+    } else if (sd_version_is_flux(sd_ctx->sd->version)) {
+        params.mem_size *= 4;
     }
     if (sd_ctx->sd->stacked_id) {
         params.mem_size += static_cast<size_t>(10 * 1024 * 1024);  // 10 MB
